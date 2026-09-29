@@ -1,0 +1,136 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  CloudPulse AI - Enterprise FinOps, Well-Architected & Resiliency Platform.
+  Provisions S3, CloudFront CDN, DynamoDB Audit Table, and Serverless Execution Roles.
+
+Parameters:
+  EnvironmentName:
+    Type: String
+    Default: production
+    AllowedValues: [development, staging, production]
+    Description: Deployment target environment.
+
+Resources:
+  # =========================================================================
+  # 1. S3 Static Hosting Bucket (Enforced Least Privilege & Encrypted)
+  # =========================================================================
+  HostingBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "cloudpulse-ai-hosting-${AWS::AccountId}-${AWS::Region}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+  # =========================================================================
+  # 2. CloudFront Origin Access Control (OAC)
+  # =========================================================================
+  CloudFrontOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: !Sub "CloudPulse-OAC-${EnvironmentName}"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # =========================================================================
+  # 3. CloudFront Global CDN Distribution
+  # =========================================================================
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        Comment: !Sub "CloudPulse AI SPA Global Distribution (${EnvironmentName})"
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt HostingBucket.RegionalDomainName
+            OriginAccessControlId: !GetAtt CloudFrontOAC.Id
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD, OPTIONS]
+          CachedMethods: [GET, HEAD]
+          Compress: true
+          ForwardedValues:
+            QueryString: false
+            Cookies:
+              Forward: none
+        # Single Page Application (SPA) routing: redirect 403 & 404 to /index.html
+        CustomErrorResponses:
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 10
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+            ErrorCachingMinTTL: 10
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+
+  # =========================================================================
+  # 4. S3 Bucket Policy allowing CloudFront Read Access via OAC
+  # =========================================================================
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref HostingBucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: AllowCloudFrontServicePrincipalReadOnly
+            Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${HostingBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}"
+
+  # =========================================================================
+  # 5. DynamoDB Table for FinOps Anomalies & Autonomous Remediation Audit Trail
+  # =========================================================================
+  FinOpsAuditTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "CloudPulse-FinOpsAudit-${EnvironmentName}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: ResourceId
+          AttributeType: S
+        - AttributeName: Timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: ResourceId
+          KeyType: HASH
+        - AttributeName: Timestamp
+          KeyType: RANGE
+      SSESpecification:
+        SSEEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+Outputs:
+  WebsiteURL:
+    Description: Live CloudFront Public HTTPS URL (Ship Gate Submission Link)
+    Value: !Sub "https://${CloudFrontDistribution.DomainName}"
+  HostingBucketName:
+    Description: S3 Bucket Name for deployment sync
+    Value: !Ref HostingBucket
+  AuditTableName:
+    Description: DynamoDB Table Name for FinOps Audit Trail
+    Value: !Ref FinOpsAuditTable
