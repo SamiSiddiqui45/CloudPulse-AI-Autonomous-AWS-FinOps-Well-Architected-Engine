@@ -12,8 +12,8 @@
 * **Lane:** Startups
 * **Lane Tag (Required):** `#startups`
 * **Tagline:** Autonomous AI-native cloud governance platform connected to AWS Console via MCP. Live cost anomaly detection, automated infrastructure remediation, chaos resilience sandbox, and 6-pillar Well-Architected scoring.
-* **Public Live URL (Ship Gate):** `https://main.d123456789.amplifyapp.com` *(Replace with your live AWS Amplify / CloudFront URL)*
-* **GitHub Repository:** *(Optional / Add your repo link)*
+* **Public Live URL (Ship Gate):** `https://main.d1li4p5kl468bn.amplifyapp.com`
+* **GitHub Repository:** `https://github.com/SamiSiddiqui45/cloudpulse-ai`
 
 ---
 
